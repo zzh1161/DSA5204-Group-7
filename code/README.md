@@ -29,7 +29,7 @@
 
 + For `Schrodinger_2D`, no need to generate data. Just run `Main.py`, you can get the results. We only save the generated gif in the folder. Running the code generates every frame of the simulation.
 
-+ For `network_test`, three files named with `main` are corresponding to the training codes for the three different networks. Running the three files gives three different models. In the file `error_plot`, we compare the error for the three networks. Running it gives the error comparation plot.
++ For `network_test`, three files named with `train` are corresponding to the training codes for the three different networks. Running the three files gives three different models. In the file `error_plot`, we compare the error for the three networks. Running it gives the error comparation plot.
 
 ## Acknowledege
 
