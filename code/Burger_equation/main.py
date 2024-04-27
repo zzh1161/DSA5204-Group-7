@@ -33,7 +33,7 @@ def plot_u(idx, x0, ur, un):
     plt.legend()
     plt.draw()
     plt.savefig('figs/original_burger_{}.png'.format(idx))
-    plt.pause(1)
+    plt.pause(.1)
 
 def plot_initial(init_idx, frame_idx, x0, ur, un):
     plt.clf()
