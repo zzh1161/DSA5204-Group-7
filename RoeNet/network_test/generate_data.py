@@ -4,10 +4,17 @@ import math
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 import torch.nn as nn
-import random
 import h5py
 import os
 os.chdir(os.path.dirname(__file__))
+
+def cal_boundry(u, igst):
+    m, n, l = u.shape
+    u = torch.cat((u[:, :, -2*igst:-igst], u[:, :, igst: -igst], u[:, :, igst:2*igst]), dim=2)
+    return u
+
+def to_np(x):
+    return x.detach().cpu().numpy()
 
 igst = 10
 grid_size = 100
@@ -24,16 +31,9 @@ x0f[:, :, igst:l + igst] = x0[:, :, 0:l]
 tstart = 0.0
 n_steps = 80
 nconp = 1
-#L = torch.randn([nconp,nconp])
 L = torch.tensor([1.]).reshape([nconp,nconp])
 R = torch.inverse(L)
-#Lam = torch.randn(nconp)
 Lam = torch.tensor([1.])
-def cal_boundry(u, igst):
-    m, n, l = u.shape
-    u = torch.cat((u[:, :, -2*igst:-igst], u[:, :, igst: -igst], u[:, :, igst:2*igst]), dim=2)
-    return u
-
 
 def runge_kutta(z0, t1_t0, f, eps=0.001):
     n_steps = round(t1_t0 / eps)
@@ -46,11 +46,6 @@ def runge_kutta(z0, t1_t0, f, eps=0.001):
         k2 = cal_boundry(0.75*z + 0.25*k1 + 0.25 * h * f(k1), igst)
         z = cal_boundry(z/3. + 2.*k2/3. + 2. * h * f(k2)/3., igst)
     return z
-
-
-def to_np(x):
-    return x.detach().cpu().numpy()
-
 
 class NeuralODE(nn.Module):
     def __init__(self, func, tol=1e-3):
@@ -145,7 +140,6 @@ def gen_data():
             print(i)
             t0 = np.random.uniform(0.0, 0.001)
             uC0 = any_solution(x0f,t0)
-            #DT = np.random.uniform(0.01, 0.05)
             uC1 = any_solution(x0f,t0+DT)
             data_uC0.append(uC0)
             data_uC1.append(uC1)
@@ -163,7 +157,7 @@ def gen_data():
     hf.create_dataset('DT', data=data_DT)
     hf.close()
 
-
-gen_data()
-gen_test_data()
-gen_Any_data()
+if __name__ == '__main__':
+    gen_data()
+    gen_test_data()
+    gen_Any_data()
