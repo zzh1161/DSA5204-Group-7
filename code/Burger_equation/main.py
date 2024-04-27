@@ -1,25 +1,81 @@
 import torch
-import numpy as np
-import matplotlib.pyplot as plt
 import torch.nn.functional as F
 import torch.nn as nn
-import random
+import torch.utils.data
+import numpy as np
+import matplotlib.pyplot as plt
 import h5py
 import os
-import torch.utils.data
 os.chdir(os.path.dirname(__file__))
 
-def to_np(x):
+def to_numpy(x):
     return x.detach().cpu().numpy()
 
-def cal_boundry(u, igst):
-    m, n, l = u.shape
+def boundary_condition(u, igst):
     u = torch.cat((u[:, :, -2*igst:-igst], u[:, :, igst: -igst], u[:, :, igst:2*igst]), dim=2)
     return u
 
-class ResidualBlock(nn.Module):
+def plot_u(idx, x0, ur, un):
+    plt.clf()
+    x = to_numpy(torch.squeeze(x0))
+    un = to_numpy(un); un = np.reshape(un, (-1,1))
+    ur = to_numpy(ur)
+    N = len(x)
+    x_sample = x[0:N:3]
+    un_sample = un[0:N:3]
+    plt.clf()
+    plt.plot(x, ur, 'g--', label='Roe solver')
+    plt.scatter(x_sample, un_sample, c='none', marker='s', edgecolors='r', label='RoeNet')
+    plt.xlim(-0.5, 0.5)
+    plt.ylim(-0.6, 1.6)
+    plt.xlabel('x')
+    plt.ylabel('u')
+    plt.legend()
+    plt.draw()
+    plt.savefig('figs/original_burger_{}.png'.format(idx))
+    plt.pause(1)
+
+def plot_initial(init_idx, frame_idx, x0, ur, un):
+    plt.clf()
+    x = to_numpy(torch.squeeze(x0))
+    un = to_numpy(un); un = np.reshape(un, (-1,1))
+    ur = to_numpy(ur)
+    N = len(x)
+    x_sample = x[0:N:3]
+    un_sample = un[0:N:3]
+    plt.clf()
+    plt.plot(x, ur, 'g--', label='Roe solver')
+    plt.scatter(x_sample, un_sample, c='none', marker='s', edgecolors='r', label='RoeNet')
+    plt.xlim(-0.5, 0.5)
+    plt.ylim(-0.6, 1.6)
+    plt.xlabel('x')
+    plt.ylabel('u')
+    plt.legend()
+    plt.savefig('figs/burger_initial{}_{}.png'.format(init_idx, frame_idx))
+    plt.show()
+
+class Dataset(torch.utils.data.Dataset):
+    def __init__(self, data_type):
+        f = h5py.File('data.h5')
+        self.uC0 = f['uC0'][:]
+        self.uC1 = f['uC1'][:]
+        self.DT = f['DT'][:]
+        split = int(self.uC0.shape[0] * 0.9)
+        if data_type == 'train':
+            self.uC0, self.uC1, self.DT = self.uC0[:split], self.uC1[:split], self.DT[:split]
+        else:
+            self.uC0, self.uC1, self.DT = self.uC0[split:], self.uC1[split:], self.DT[split:]
+        f.close()
+
+    def __getitem__(self, index):
+        return self.uC0[index], self.uC1[index], self.DT[index]
+
+    def __len__(self):
+        return self.uC0.shape[0]
+
+class ResBlock(nn.Module):
     def __init__(self, inchannel, outchannel, kernel_size=3):
-        super(ResidualBlock, self).__init__()
+        super(ResBlock, self).__init__()
         self.kernel_size = kernel_size
         self.left = nn.Sequential(
             nn.Conv1d(inchannel, outchannel, kernel_size=kernel_size, padding=0),
@@ -41,36 +97,35 @@ class ResidualBlock(nn.Module):
         out = F.relu(out)
         return out
 
-class ODEnet(nn.Module):
+class Roenet(nn.Module):
     def __init__(self, dx, igst, eps):
-        super(ODEnet, self).__init__()
+        super(Roenet, self).__init__()
         self.comp = 1
         self.hide = 4
         self.igst = igst
         self.dx = dx
         self.eps = eps
         
-        self.cal_lam = nn.Sequential(ResidualBlock(self.comp*2, 16),
-                                      ResidualBlock(16, 16),
-                                      ResidualBlock(16, 32),
-                                      ResidualBlock(32, 64),
-                                      ResidualBlock(64, 64),
-                                      ResidualBlock(64, 64, kernel_size=1),
+        self.cal_lam = nn.Sequential(ResBlock(self.comp*2, 16),
+                                      ResBlock(16, 16),
+                                      ResBlock(16, 32),
+                                      ResBlock(32, 64),
+                                      ResBlock(64, 64),
+                                      ResBlock(64, 64, kernel_size=1),
                                       nn.Conv1d(64, self.hide, kernel_size=1, padding=0),
                                       )
-        self.cal_L = nn.Sequential(ResidualBlock(self.comp*2, 16),
-                                    ResidualBlock(16, 16),
-                                    ResidualBlock(16, 32),
-                                    ResidualBlock(32, 64),
-                                    ResidualBlock(64, 64),
-                                    ResidualBlock(64, 64, kernel_size=1),
+        self.cal_L = nn.Sequential(ResBlock(self.comp*2, 16),
+                                    ResBlock(16, 16),
+                                    ResBlock(16, 32),
+                                    ResBlock(32, 64),
+                                    ResBlock(64, 64),
+                                    ResBlock(64, 64, kernel_size=1),
                                     nn.Conv1d(64, self.comp*self.hide, kernel_size=1, padding=0),
                                     )
 
-    def cal_du(self, um):
+    def get_du(self, um):
         ul = torch.cat((um[:, :, -1:], um[:, :, :-1]), 2)
         ur = torch.cat((um[:, :, 1:], um[:, :, :1]), 2)
-
         data_left = torch.cat((ul, um), 1)
         data_right = torch.cat((um, ur), 1)
 
@@ -78,14 +133,13 @@ class ODEnet(nn.Module):
         lam_l = torch.diag_embed(lam_l)
         lam_r = self.cal_lam(data_right).transpose(1, 2)# / 10
         lam_r = torch.diag_embed(lam_r)
-
         L_l = self.cal_L(data_left).transpose(1, 2)
         L_l = L_l.reshape(L_l.shape[0], L_l.shape[1], self.hide, self.comp)
         L_r = self.cal_L(data_right).transpose(1, 2)
         L_r = L_l.reshape(L_r.shape[0], L_r.shape[1], self.hide, self.comp)
-
         R_l = torch.inverse((L_l.transpose(2,3))@L_l)@(L_l.transpose(2,3))
         R_r = torch.inverse((L_r.transpose(2,3))@L_r)@(L_r.transpose(2,3))
+
         um = um.transpose(1, 2).unsqueeze(-1)
         ul = ul.transpose(1, 2).unsqueeze(-1)
         ur = ur.transpose(1, 2).unsqueeze(-1)
@@ -95,15 +149,15 @@ class ODEnet(nn.Module):
 
         return -out.squeeze(-1).transpose(1, 2) / (2 * self.dx)
 
-    def forward(self, z0, t1_t0):
-        n_steps = round(t1_t0 / self.eps)
-        h = t1_t0 / n_steps
+    def forward(self, z0, Delta_t):
+        steps = round(Delta_t / self.eps)
+        h = Delta_t / steps
         z = z0
-        for i_step in range(int(n_steps)):
-            z = cal_boundry(z + h * self.cal_du(z), self.igst)
+        for _ in range(int(steps)):
+            z = boundary_condition(z + h * self.get_du(z), self.igst)
         return z
 
-device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 igst = 10
 grid_size = 100
 time_size = 81
@@ -112,8 +166,8 @@ xe = 0.5
 lx = xe - xs
 dx = lx / grid_size
 DT = 0.01
-f_neur = ODEnet(dx, igst, eps=0.001)
-f_neur.to(device)
+model = Roenet(dx, igst, eps=0.001)
+model.to(device)
 x0 = torch.tensor(range(grid_size), dtype=torch.float32, requires_grad=True).unsqueeze(0).unsqueeze(0) * lx / grid_size + xs
 m, n, l = x0.shape
 x0f = torch.zeros(m, n, l + igst * 2)
@@ -121,123 +175,43 @@ x0f[:, :, 0:igst] = x0[:, :, l - igst:l] - lx
 x0f[:, :, l + igst:l + igst * 2] = x0[:, :, 0:igst] + lx
 x0f[:, :, igst:l + igst] = x0[:, :, 0:l]
 
-def to_np(x):
-    return x.detach().cpu().numpy()
-
-def plot_u(idx, x0, ur, un):
-    plt.clf()
-    x = to_np(torch.squeeze(x0))
-    un = to_np(un); un = np.reshape(un, (-1,1))
-    ur = to_np(ur)
-    N = len(x)
-    x_sample = x[0:N:3]
-    un_sample = un[0:N:3]
-    plt.clf()
-    plt.plot(x, ur, 'g--', label='Roe solver')
-    plt.scatter(x_sample, un_sample, c='none', marker='s', edgecolors='r', label='RoeNet')
-    plt.xlim(-0.5, 0.5)
-    plt.ylim(-0.6, 1.6)
-    plt.xlabel('x')
-    plt.ylabel('u')
-    plt.legend()
-    plt.draw()
-    plt.savefig('figs/burger_initial3_{}.png'.format(idx))
-    plt.pause(1)
-
-def test():
-    f_neur.load_state_dict(torch.load("model.pt", map_location=lambda storage, location: storage))
-    f_neur.to(device)
-    f_neur.eval()
-    uR = torch.load('uRoe.dat')
-    uF = uR[0:1, :, :].to(device)
-    check_dim = 0
-    with torch.no_grad():
-        with open('nontrivial1c.dat','w') as f:
-            for j in range(time_size):
-                f.write('ZONE T = "zone')
-                f.write('\t\t')
-                f.write(str(j))
-                f.write('"')
-                f.write('\n')
-                for i in range(grid_size+20):
-                    tnp = to_np(x0f)
-                    f.write(str(tnp[0,0,i]))
-                    f.write('\t\t')
-                    rnp = to_np(uR)
-                    f.write(str(rnp[j,0,i]))
-                    f.write('\t\t')
-                    fnp = to_np(uF)
-                    f.write(str(fnp[0,0,i]))
-                    f.write('\n')
-                uF = f_neur(uF, DT)
-        uF = uR[0:1, :, :].to(device)
-        for i in range(time_size):
-            if i == 30:
-                plot_u(i, x0f, uR[i, check_dim, :], uF[:, check_dim, :])
-            uF = f_neur(uF, DT)
-
-class Dataset(torch.utils.data.Dataset):
-    def __init__(self, data_type):
-        f = h5py.File('data.h5')
-        self.uC0 = f['uC0'][:]
-        self.uC1 = f['uC1'][:]
-        self.DT = f['DT'][:]
-        split = int(self.uC0.shape[0] * 0.9)
-        if data_type == 'train':
-            self.uC0, self.uC1, self.DT = self.uC0[:split], self.uC1[:split], self.DT[:split]
-        else:
-            self.uC0, self.uC1, self.DT = self.uC0[split:], self.uC1[split:], self.DT[split:]
-        f.close()
-
-    def __getitem__(self, index):
-        return self.uC0[index], self.uC1[index], self.DT[index]
-
-    def __len__(self):
-        return self.uC0.shape[0]
-
-
 def train():
-    n_epoch = 1000
-    optimizer = torch.optim.Adam(f_neur.parameters(), lr=0.0001)
+    epochs = 1000
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
     train_data_loader = torch.utils.data.DataLoader(Dataset('train'), batch_size=32, shuffle=True)
-    test_data_loader = torch.utils.data.DataLoader(Dataset('test'), batch_size=32, shuffle=True)
-    lowest_test_loss = 99999
-
-    for i in range(n_epoch):
+    for i in range(epochs):
         train_loss = 0
         train_sample = 0
-        f_neur.train()
-
-        for batch_index, data_batch in enumerate(train_data_loader):
+        model.train()
+        for _, data_batch in enumerate(train_data_loader):
             uC0, uC1, DT = data_batch
             uC0, uC1 = uC0.to(device), uC1.to(device)
-            uN1 = f_neur(uC0, DT[0].cpu().item())
+            uN1 = model(uC0, DT[0].cpu().item())
             loss = torch.nn.functional.mse_loss(uN1, uC1)
             optimizer.zero_grad()
             loss.backward()
             train_loss += loss.detach().cpu().item()
             train_sample += 1
             optimizer.step()
-
         scheduler.step()
-        test_loss = 0
-        test_sample = 0
-        f_neur.eval()
+        print(i+1, train_loss / train_sample)
+        torch.save(model.state_dict(), "model.pt")
 
-        with torch.no_grad():
-            for batch_index, data_batch in enumerate(test_data_loader):
-                uC0, uC1, _ = data_batch
-                uC0, uC1 = uC0.to(device), uC1.to(device)
-                uN1 = f_neur(uC0, DT[0].cpu().item())
-                loss = torch.nn.functional.l1_loss(uN1, uC1)
-                test_loss += loss.detach().cpu().item()
-                test_sample += 1
-
-        print(i + 1, train_loss / train_sample, test_loss / test_sample)
-        if lowest_test_loss > test_loss / test_sample:
-            torch.save(f_neur.state_dict(), "model.pt")
-            lowest_test_loss = test_loss / test_sample
+def test():
+    model.load_state_dict(torch.load("model.pt"))
+    model.to(device)
+    model.eval()
+    uR = torch.load('uRoe.dat')
+    uF = uR[0:1, :, :].to(device)
+    dim = 0
+    with torch.no_grad():
+        for i in range(time_size):
+            if i == 30:
+                plot_initial(1, i, x0f, uR[i, dim, :], uF[:, dim, :])
+            if i==0 or i==20 or i==40 or i==60:
+                plot_u(i, x0f, uR[i, dim, :], uF[:, dim, :])
+            uF = model(uF, DT)
 
 if __name__ == '__main__':
     # train()

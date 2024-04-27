@@ -1,5 +1,7 @@
 # Code for DSA5204 Project -- Group 7
 
+The code is also available  from the [repo](https://github.com/zzh1161/DSA5204-Group-7/tree/master/code).
+
 ## Environment
 + Python 3.10
 + Pytorch 2.1.0
@@ -27,3 +29,7 @@
     ```
 + For `Schrodinger_2D`, we only save the generated gif in the folder. Running the code generates every frame of the simulation.
 + For `network_test`, three files named with `main` are corresponding to the training codes for the three different networks. Running the three files gives three different models. In the file `error_plot`, we compare the error for the three networks. Running it gives the error comparation plot.
+
+## Acknowledege
+
+Reference was made to the open source code of the original authors of the paper [[repo]](https://github.com/ShiyingXiong/RoeNet), as well as to torchvision’s open source code of resnet [[repo]](https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py).

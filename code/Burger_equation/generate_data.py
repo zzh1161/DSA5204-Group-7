@@ -72,10 +72,10 @@ class CentDif(nn.Module):
         return -um*du
     
 def any_solution(x0f,t):
-    # u = 0.5 + torch.sin(x0f*2.*math.pi)
-    # u = 0.5 + torch.cos(x0f*2.*math.pi)
-    # u = 0.5 - torch.sin(x0f*2.*math.pi)
-    u = 2.*torch.exp(-10.*x0f**2) - 0.5
+    u = 0.5 + torch.sin(x0f*2.*math.pi) # original initial value
+    # u = 0.5 + torch.cos(x0f*2.*math.pi) # initial value 1
+    # u = 0.5 - torch.sin(x0f*2.*math.pi) # initial value 2
+    # u = 2.*torch.exp(-10.*x0f**2) - 0.5 # initial value 3
     dx = x0f[0,0,1]-x0f[0,0,0]
     ff = CentDif(dx)
     ff.eval()
