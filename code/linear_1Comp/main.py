@@ -154,7 +154,7 @@ x0f[:, :, igst:l + igst] = x0[:, :, 0:l]
 time_size = 101
 
 def train():
-    epochs = 50
+    epochs = 500
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.9)
     train_data_loader = torch.utils.data.DataLoader(Dataset('train'), batch_size=32, shuffle=True)
